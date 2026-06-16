@@ -11,3 +11,16 @@ wheels/
 .env
 venv/
 .env
+
+.idea
+
+
+node_modules/
+frontend/node_modules/
+
+dist/
+build/
+
+generated_project/
+.idea/
+.env
