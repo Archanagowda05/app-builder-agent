@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAgentSocket } from "./hooks/useAgentSocket";
+import ProjectSidebar from "./components/ProjectSidebar";
 import PipelineStatus from "./components/PipelineStatus";
 import LogStream from "./components/LogStream";
 import PromptForm from "./components/PromptForm";
@@ -7,6 +8,8 @@ import PlanView from "./components/PlanView";
 import FileExplorer from "./components/FileExplorer";
 import PreviewPane from "./components/PreviewPane";
 import ErrorBanner from "./components/ErrorBanner";
+import ChatEditor from "./components/ChatEditor";
+import HistoryView from "./components/HistoryView";
 
 const STATUS_LABEL = {
   idle: "idle",
@@ -16,7 +19,12 @@ const STATUS_LABEL = {
 };
 
 export default function App() {
-  const [tab, setTab] = useState("plan");
+  const [activeProject, setActiveProject] = useState("kid-calculator");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [leftTab, setLeftTab] = useState("chat"); // "chat" | "build"
+  const [rightTab, setRightTab] = useState("preview"); // "preview" | "files" | "history" | "plan"
+  const [refreshSignalCount, setRefreshSignalCount] = useState(0);
+
   const {
     status,
     activeNode,
@@ -26,73 +34,231 @@ export default function App() {
     coderState,
     logs,
     error,
+    currentProject,
     run,
     retry,
   } = useAgentSocket();
 
-  // Bump this whenever the coder writes a file, or the run finishes, so
-  // FileExplorer and PreviewPane re-fetch.
-  const refreshSignal = `${activeNode ?? ""}-${coderState?.current_step_idx ?? 0}-${status}`;
-  const hasFiles = Boolean(coderState) || status === "done";
+  useEffect(() => {
+    if (currentProject && currentProject !== activeProject) {
+      setActiveProject(currentProject);
+      setRefreshSignalCount((prev) => prev + 1);
+    }
+  }, [currentProject]);
+
+  const handleProjectUpdated = () => {
+    setRefreshSignalCount((prev) => prev + 1);
+  };
+
+  const handleSelectProject = (projectId) => {
+    setActiveProject(projectId);
+    setRefreshSignalCount((prev) => prev + 1);
+  };
+
+  const handleNewProject = (name) => {
+    const cleanId = name.toLowerCase().replace(/[^a-z0-9-_]/g, "-").replace(/-+/g, "-");
+    fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: cleanId }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        setActiveProject(data.id);
+        setLeftTab("build");
+        setRefreshSignalCount((prev) => prev + 1);
+      })
+      .catch((e) => alert("Failed to create project: " + e.message));
+  };
+
+  const handleInitialGenerate = (promptText) => {
+    run(promptText, activeProject);
+  };
+
+  const refreshSignal = `${activeProject}-${activeNode ?? ""}-${coderState?.current_step_idx ?? 0}-${status}-${refreshSignalCount}`;
 
   return (
-    <div className="app">
-      <aside className="chat-panel">
-        <div className="brand">
-          <div className="brand-mark">AC</div>
-          <div className="brand-text">
-            <h1>Agent Console</h1>
-            <p>planner → architect → coder</p>
+    <div style={{ display: "flex", height: "100vh", width: "100vw", overflow: "hidden", background: "var(--bg)" }}>
+      {/* 1. Left Minimizable Project History Sidebar */}
+      <ProjectSidebar
+        activeProject={activeProject}
+        onSelectProject={handleSelectProject}
+        onNewProject={handleNewProject}
+        refreshSignal={refreshSignal}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+      />
+
+      {/* 2. Chat / Modification Panel (Lovable left-side interaction) */}
+      <aside
+        style={{
+          width: "420px",
+          display: "flex",
+          flexDirection: "column",
+          borderRight: "1px solid var(--surface-border)",
+          background: "var(--bg-elevated)",
+          height: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        {/* Panel Header */}
+        <div
+          style={{
+            padding: "12px 16px",
+            borderBottom: "1px solid var(--surface-border)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: "700", fontSize: "14px", color: "var(--text-primary)" }}>
+              {activeProject}
+            </div>
+            <div style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+              Active Project Workspace
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "4px", background: "var(--surface)", padding: "3px", borderRadius: "6px" }}>
+            <button
+              onClick={() => setLeftTab("chat")}
+              style={{
+                background: leftTab === "chat" ? "var(--accent)" : "transparent",
+                color: leftTab === "chat" ? "#fff" : "var(--text-secondary)",
+                border: "none",
+                borderRadius: "4px",
+                padding: "4px 10px",
+                fontSize: "12px",
+                fontWeight: "600",
+                cursor: "pointer",
+              }}
+            >
+              💬 Modify
+            </button>
+            <button
+              onClick={() => setLeftTab("build")}
+              style={{
+                background: leftTab === "build" ? "var(--accent)" : "transparent",
+                color: leftTab === "build" ? "#fff" : "var(--text-secondary)",
+                border: "none",
+                borderRadius: "4px",
+                padding: "4px 10px",
+                fontSize: "12px",
+                fontWeight: "600",
+                cursor: "pointer",
+              }}
+            >
+              ⚡ Full Rebuild
+            </button>
           </div>
         </div>
 
-        <PipelineStatus
-          activeNode={activeNode}
-          completedNodes={completedNodes}
-          status={status}
-        />
+        {/* Tab 1: In-Place Chat Refinement (Lovable style) */}
+        {leftTab === "chat" && (
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ChatEditor
+              project={activeProject}
+              onProjectUpdated={handleProjectUpdated}
+              disabled={status === "running"}
+            />
+          </div>
+        )}
 
-        <LogStream logs={logs} />
-
-        <ErrorBanner error={error} onRetry={retry} />
-
-        <PromptForm onSubmit={run} disabled={status === "running"} />
+        {/* Tab 2: Full Build / Scratch Generation Mode */}
+        {leftTab === "build" && (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "16px", gap: "14px", overflowY: "auto" }}>
+            <div style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
+              Re-generate or plan the full application from a complete specification prompt:
+            </div>
+            <PipelineStatus
+              activeNode={activeNode}
+              completedNodes={completedNodes}
+              status={status}
+            />
+            <LogStream logs={logs} />
+            <ErrorBanner error={error} onRetry={retry} />
+            <PromptForm
+              onSubmit={handleInitialGenerate}
+              disabled={status === "running"}
+              placeholder={`Build entire ${activeProject} from scratch...`}
+            />
+          </div>
+        )}
       </aside>
 
-      <main className="main-panel">
-        <div className="tabs" style={{ justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: 4 }}>
+      {/* 3. Main Center/Right Panel: Live Preview & Inspection */}
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+        {/* Right Header Navigation Tabs */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "8px 16px 0 16px",
+            borderBottom: "1px solid var(--surface-border)",
+            background: "var(--bg)",
+          }}
+        >
+          <div style={{ display: "flex", gap: "6px" }}>
             <button
-              className={`tab ${tab === "plan" ? "active" : ""}`}
-              onClick={() => setTab("plan")}
+              className={`tab ${rightTab === "preview" ? "active" : ""}`}
+              onClick={() => setRightTab("preview")}
             >
-              Plan & Tasks
+              👁️ Preview
             </button>
             <button
-              className={`tab ${tab === "files" ? "active" : ""}`}
-              onClick={() => setTab("files")}
+              className={`tab ${rightTab === "files" ? "active" : ""}`}
+              onClick={() => setRightTab("files")}
             >
-              Files
+              📄 Code Files
             </button>
             <button
-              className={`tab ${tab === "preview" ? "active" : ""}`}
-              onClick={() => setTab("preview")}
+              className={`tab ${rightTab === "history" ? "active" : ""}`}
+              onClick={() => setRightTab("history")}
             >
-              Preview
+              🕒 Version History
+            </button>
+            <button
+              className={`tab ${rightTab === "plan" ? "active" : ""}`}
+              onClick={() => setRightTab("plan")}
+            >
+              📋 Architecture Plan
             </button>
           </div>
-          <div style={{ display: "flex", alignItems: "center", paddingRight: 4 }}>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", paddingBottom: "8px" }}>
             <span className={`status-badge ${status}`}>{STATUS_LABEL[status]}</span>
           </div>
         </div>
 
-        <div className="tab-content">
-          {tab === "plan" && (
-            <PlanView plan={plan} taskPlan={taskPlan} coderState={coderState} />
+        {/* Tab Content */}
+        <div style={{ flex: 1, padding: "16px", overflow: "hidden" }}>
+          {rightTab === "preview" && (
+            <PreviewPane
+              project={activeProject}
+              refreshSignal={refreshSignal}
+              hasFiles={true}
+            />
           )}
-          {tab === "files" && <FileExplorer refreshSignal={refreshSignal} />}
-          {tab === "preview" && (
-            <PreviewPane refreshSignal={refreshSignal} hasFiles={hasFiles} />
+          {rightTab === "files" && (
+            <FileExplorer
+              project={activeProject}
+              refreshSignal={refreshSignal}
+            />
+          )}
+          {rightTab === "history" && (
+            <HistoryView
+              project={activeProject}
+              refreshSignal={refreshSignal}
+              onRestore={handleProjectUpdated}
+            />
+          )}
+          {rightTab === "plan" && (
+            <PlanView
+              plan={plan}
+              taskPlan={taskPlan}
+              coderState={coderState}
+            />
           )}
         </div>
       </main>

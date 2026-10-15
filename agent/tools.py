@@ -1,33 +1,54 @@
 import pathlib
-import subprocess
-
 from langchain_core.tools import tool
 
-PROJECT_ROOT = pathlib.Path.cwd() / "generated_project"
-PROJECT_ROOT.mkdir(parents=True, exist_ok=True)
+# Isolated storage directory (gitignored - never committed to codebase)
+PROJECTS_ROOT = pathlib.Path.cwd() / "storage" / "projects"
+PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
+
+# Active project directory pointer
+CURRENT_PROJECT_DIR = PROJECTS_ROOT / "kid-calculator"
+CURRENT_PROJECT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def safe_path_for_project(path: str) -> pathlib.Path:
-    path = path.lstrip("/")
-    p = (PROJECT_ROOT / path).resolve()
-    if PROJECT_ROOT.resolve() not in p.parents and PROJECT_ROOT.resolve() != p.parent and PROJECT_ROOT.resolve() != p:
-        raise ValueError("Attempt to write outside project root")
+def set_active_project(project_name: str) -> pathlib.Path:
+    global CURRENT_PROJECT_DIR
+    clean_name = "".join(c for c in str(project_name) if c.isalnum() or c in ("-", "_")).strip() or "default"
+    CURRENT_PROJECT_DIR = PROJECTS_ROOT / clean_name
+    CURRENT_PROJECT_DIR.mkdir(parents=True, exist_ok=True)
+    return CURRENT_PROJECT_DIR
+
+
+def get_project_dir(project_name: str = None) -> pathlib.Path:
+    if project_name:
+        clean_name = "".join(c for c in str(project_name) if c.isalnum() or c in ("-", "_")).strip() or "default"
+        p = PROJECTS_ROOT / clean_name
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return CURRENT_PROJECT_DIR
+
+
+def safe_path_for_project(path: str, base_dir: pathlib.Path = None) -> pathlib.Path:
+    target_root = (base_dir or CURRENT_PROJECT_DIR).resolve()
+    path = path.lstrip("/").lstrip("\\")
+    p = (target_root / path).resolve()
+    if target_root not in p.parents and target_root != p.parent and target_root != p:
+        raise ValueError("Attempt to access path outside project root")
     return p
 
 
 @tool
 def write_file(path: str, content: str) -> str:
-    """Writes content to a file at the specified path within the project root."""
+    """Writes content to a file at the specified path within the active project root."""
     p = safe_path_for_project(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         f.write(content)
-    return f"WROTE:{p}"
+    return f"WROTE:{p.name}"
 
 
 @tool
 def read_file(path: str) -> str:
-    """Reads content from a file at the specified path within the project root."""
+    """Reads content from a file at the specified path within the active project root."""
     p = safe_path_for_project(path)
     if not p.exists():
         return ""
@@ -37,34 +58,15 @@ def read_file(path: str) -> str:
 
 @tool
 def get_current_directory() -> str:
-    """Returns the current working directory."""
-    return str(PROJECT_ROOT)
+    """Returns the current active project directory."""
+    return str(CURRENT_PROJECT_DIR)
 
 
 @tool
 def list_files(directory: str = ".") -> str:
-    """Lists all files in the specified directory within the project root."""
+    """Lists all files in the specified directory within the active project root."""
     p = safe_path_for_project(directory)
     if not p.is_dir():
         return f"ERROR: {p} is not a directory"
-    files = [str(f.relative_to(PROJECT_ROOT)) for f in p.glob("**/*") if f.is_file()]
+    files = [str(f.relative_to(CURRENT_PROJECT_DIR)).replace("\\", "/") for f in p.glob("**/*") if f.is_file() and ".history" not in f.parts]
     return "\n".join(files) if files else "No files found."
-
-
-@tool
-def run_cmd(cmd: str, cwd: str = None, timeout: int = 30) -> str:
-    """Runs a shell command in the specified directory and returns the result as a string."""
-    cwd_dir = safe_path_for_project(cwd) if cwd else PROJECT_ROOT
-    try:
-        res = subprocess.run(
-            cmd, shell=True, cwd=str(cwd_dir),
-            capture_output=True, text=True, timeout=timeout
-        )
-        return f"EXIT_CODE: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    except subprocess.TimeoutExpired:
-        return f"ERROR: command timed out after {timeout}s"
-
-
-def init_project_root():
-    PROJECT_ROOT.mkdir(parents=True, exist_ok=True)
-    return str(PROJECT_ROOT)

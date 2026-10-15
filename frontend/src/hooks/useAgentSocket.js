@@ -1,16 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 /**
- * Manages a single WebSocket run of the agent graph.
- *
- * Tracks:
- * - status: "idle" | "running" | "done" | "error"
- * - activeNode: name of the node currently executing ("planner" | "architect" | "coder" | null)
- * - completedNodes: set of node names that have produced at least one step
- * - plan, taskPlan: latest structured outputs from planner / architect
- * - coderState: latest coder progress (task_plan + current_step_idx)
- * - logs: chronological list of step events for the log stream
- * - error: { code, message, retryable } | null
+ * Manages a single WebSocket run of the agent graph for a given project.
  */
 export function useAgentSocket() {
   const [status, setStatus] = useState("idle");
@@ -21,9 +12,11 @@ export function useAgentSocket() {
   const [coderState, setCoderState] = useState(null);
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
+  const [currentProject, setCurrentProject] = useState(null);
 
   const socketRef = useRef(null);
   const lastPromptRef = useRef("");
+  const lastProjectRef = useRef("");
 
   const reset = useCallback(() => {
     setActiveNode(null);
@@ -36,12 +29,13 @@ export function useAgentSocket() {
   }, []);
 
   const run = useCallback(
-    (userPrompt) => {
+    (userPrompt, projectName = "", token = "") => {
       if (socketRef.current) {
         socketRef.current.close();
       }
 
       lastPromptRef.current = userPrompt;
+      lastProjectRef.current = projectName;
       reset();
       setStatus("running");
 
@@ -50,12 +44,23 @@ export function useAgentSocket() {
       socketRef.current = ws;
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ user_prompt: userPrompt }));
-        setLogs((prev) => [...prev, { type: "system", text: "Run started" }]);
+        ws.send(
+          JSON.stringify({
+            user_prompt: userPrompt,
+            project_name: projectName,
+            token: token,
+          })
+        );
+        setLogs((prev) => [...prev, { type: "system", text: `Run started for "${projectName || "new project"}"` }]);
       };
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
+
+        if (msg.type === "project_info") {
+          setCurrentProject(msg.project_id);
+          return;
+        }
 
         if (msg.type === "error") {
           const friendly = {
@@ -72,7 +77,8 @@ export function useAgentSocket() {
         if (msg.type === "done") {
           setStatus("done");
           setActiveNode(null);
-          setLogs((prev) => [...prev, { type: "system", text: "Run complete" }]);
+          if (msg.project_id) setCurrentProject(msg.project_id);
+          setLogs((prev) => [...prev, { type: "system", text: "Run complete! Project ready." }]);
           return;
         }
 
@@ -129,7 +135,7 @@ export function useAgentSocket() {
 
   const retry = useCallback(() => {
     if (lastPromptRef.current) {
-      run(lastPromptRef.current);
+      run(lastPromptRef.current, lastProjectRef.current);
     }
   }, [run]);
 
@@ -142,6 +148,7 @@ export function useAgentSocket() {
     coderState,
     logs,
     error,
+    currentProject,
     run,
     retry,
   };

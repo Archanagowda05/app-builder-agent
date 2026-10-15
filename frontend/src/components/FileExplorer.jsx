@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export default function FileExplorer({ refreshSignal }) {
+export default function FileExplorer({ project, refreshSignal }) {
   const [files, setFiles] = useState([]);
   const [selected, setSelected] = useState(null);
   const [content, setContent] = useState("");
@@ -8,12 +8,20 @@ export default function FileExplorer({ refreshSignal }) {
 
   useEffect(() => {
     let cancelled = false;
+    const projParam = project ? `?project=${encodeURIComponent(project)}` : "";
 
-    fetch("/api/files")
+    const token = localStorage.getItem("app_builder_token");
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    fetch(`/api/files${projParam}`, { headers })
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
-        setFiles(data.files ?? []);
+        const fileList = data.files ?? [];
+        setFiles(fileList);
+        if (fileList.length > 0 && (!selected || !fileList.includes(selected))) {
+          setSelected(fileList[0]);
+        }
       })
       .catch(() => {
         if (!cancelled) setFiles([]);
@@ -22,7 +30,7 @@ export default function FileExplorer({ refreshSignal }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshSignal]);
+  }, [project, refreshSignal]);
 
   useEffect(() => {
     if (!selected) {
@@ -32,8 +40,11 @@ export default function FileExplorer({ refreshSignal }) {
 
     let cancelled = false;
     setLoadingContent(true);
+    const projParam = project ? `&project=${encodeURIComponent(project)}` : "";
+    const token = localStorage.getItem("app_builder_token");
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-    fetch(`/api/files/content?path=${encodeURIComponent(selected)}`)
+    fetch(`/api/files/content?path=${encodeURIComponent(selected)}${projParam}`, { headers })
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
@@ -49,13 +60,13 @@ export default function FileExplorer({ refreshSignal }) {
     return () => {
       cancelled = true;
     };
-  }, [selected, refreshSignal]);
+  }, [selected, project, refreshSignal]);
 
   return (
     <div className="file-explorer">
       <div className="glass file-tree">
         {files.length === 0 ? (
-          <div className="file-tree-empty">No files generated yet.</div>
+          <div className="file-tree-empty">No files generated in this project yet.</div>
         ) : (
           files.map((path) => (
             <button
@@ -63,7 +74,7 @@ export default function FileExplorer({ refreshSignal }) {
               className={`file-tree-item ${selected === path ? "active" : ""}`}
               onClick={() => setSelected(path)}
             >
-              {path}
+              📄 {path}
             </button>
           ))
         )}
@@ -74,7 +85,12 @@ export default function FileExplorer({ refreshSignal }) {
           <div className="code-viewer-empty">Select a file to view its contents.</div>
         ) : (
           <>
-            <div className="code-viewer-header">{selected}</div>
+            <div className="code-viewer-header" style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>{selected}</span>
+              <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                {project}
+              </span>
+            </div>
             <pre className="code-viewer-body">
               {loadingContent ? "Loading…" : content}
             </pre>

@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: app-builder-agent
+    env: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false

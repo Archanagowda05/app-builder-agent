@@ -7,20 +7,18 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
-.env
+.venv/
 venv/
 .env
 
-.idea
-
+.idea/
 
 node_modules/
 frontend/node_modules/
+frontend/dist/
 
-dist/
-build/
-
+# Generated files and user project workspace (never pushed to git codebase)
+storage/
+projects/
 generated_project/
-.idea/
-.env
+history/

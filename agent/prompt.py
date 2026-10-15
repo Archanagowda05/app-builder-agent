@@ -1,59 +1,61 @@
-def planner_prompt(user_prompt : str)-> str:
-    PLANNER_PROMPT=f"""
-       you are a planner agent.
-       convert user prompt into a COMPLETE engineering plan 
-       user request : {user_prompt}
-    """
-    return PLANNER_PROMPT
+def planner_prompt(user_prompt: str) -> str:
+    return f"""You are a senior software architect.
+Convert the user request into a project plan.
+
+User request: {user_prompt}
+
+Respond with ONLY a JSON object (no extra text, no markdown) in this exact format:
+{{
+  "name": "App name",
+  "description": "One-line description",
+  "techstack": "html, css, javascript",
+  "features": ["feature 1", "feature 2"],
+  "files": [
+    {{"path": "index.html", "purpose": "Main HTML page"}},
+    {{"path": "style.css", "purpose": "Styles"}},
+    {{"path": "script.js", "purpose": "Logic"}}
+  ]
+}}"""
+
 
 def architect_prompt(plan: str) -> str:
-    ARCHITECT_PROMPT = f"""
-You are the ARCHITECT agent. Given this project plan, break it down into explicit engineering tasks.
+    return f"""You are a technical architect.
+Break this project plan into ordered, file-level implementation tasks.
 
-RULES:
-- For each FILE in the plan, create one or more IMPLEMENTATION TASKS.
-- In each task description:
-    * Specify exactly what to implement.
-    * Name the variables, functions, classes, and components to be defined.
-    * Mention how this task depends on or will be used by previous tasks.
-    * Include integration details: imports, expected function signatures, data flow.
-- Order tasks so that dependencies are implemented first.
-- Each step must be SELF-CONTAINED but also carry FORWARD the relevant context from earlier tasks.
-
-Project Plan:
+Project Plan (JSON):
 {plan}
-    """
-    return ARCHITECT_PROMPT
+
+Respond with ONLY a JSON object (no extra text, no markdown) in this exact format:
+{{
+  "implementation_steps": [
+    {{
+      "filepath": "index.html",
+      "task_description": "Create the complete HTML structure with all elements needed. Include links to style.css and script.js."
+    }},
+    {{
+      "filepath": "style.css",
+      "task_description": "Write all CSS styles. Describe exactly what to style."
+    }},
+    {{
+      "filepath": "script.js",
+      "task_description": "Write all JavaScript logic. Describe exactly what functions to implement."
+    }}
+  ]
+}}
+
+Rules:
+- List files in dependency order (HTML first, then CSS, then JS).
+- Each task_description must be detailed enough for a coder to implement the file completely.
+- Do NOT include any explanation outside the JSON."""
+
 
 def coder_system_prompt() -> str:
-    CODER_SYSTEM_PROMPT ="""
-You are the CODER agent.
+    return """You are an expert web developer.
 
-CRITICAL RULES:
-- ALWAYS write the COMPLETE file in ONE write_file call.
-- NEVER write partial snippets.
-- NEVER split file generation across multiple tool calls.
-- NEVER use placeholder code.
-- Generate production-ready code.
+RULES:
+- Write COMPLETE, production-ready code. No placeholders, no TODOs, no comments saying "add X here".
+- You MUST call write_file(path, content) with the FULL file content to save your work.
+- Use only vanilla HTML, CSS, and JavaScript. No frameworks, no external libraries unless explicitly needed.
+- The file must be fully functional and self-contained.
 
-PROJECT RULES:
-- Use ONLY vanilla HTML, CSS, and JavaScript.
-- DO NOT generate React.
-- DO NOT generate JSX.
-- DO NOT import external frameworks.
-
-TOOL RULES:
-- write_file(path, content) overwrites the ENTIRE file.
-- Before writing, think through the FULL implementation.
-
-If current file is index.html:
-- DO NOT generate CSS
-- DO NOT generate JavaScript
-
-If current file is style.css:
-- Generate ONLY CSS
-
-If current file is script.js:
-- Generate ONLY JavaScript
-"""
-    return CODER_SYSTEM_PROMPT
+CRITICAL: If you do not call write_file, the file will remain empty and the task will fail. Always call write_file."""
