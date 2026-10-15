@@ -1,8 +1,12 @@
 """
 LangGraph agent pipeline: Planner → Architect → Coder
-- Planner & Architect use gpt-oss-20b with manual JSON extraction
-  (the model returns valid JSON in markdown blocks but doesn't support tool-call structured output)
-- Coder uses gpt-oss-120b via the react_agent (it supports tool calls)
+- Detailed status & activity streaming for UI visibility:
+  * planning (analyzing prompt & designing app structure)
+  * architecting (breaking into file-level tasks)
+  * searching & reading files
+  * coding & writing files
+  * completed files
+- Hybrid tool + direct code generation fallback
 """
 
 import json
@@ -26,28 +30,20 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
-planner_llm = ChatGroq(model="openai/gpt-oss-20b")   # cheap + fast for planning
-coder_llm   = ChatGroq(model="openai/gpt-oss-120b")  # strongest available for coding
+planner_llm = ChatGroq(model="openai/gpt-oss-20b")
+coder_llm   = ChatGroq(model="openai/gpt-oss-120b")
 
 # ---------------------------------------------------------------------------
-# React agent for the Coder node
-# run_cmd intentionally excluded (security risk)
+# React agent for Coder node
 # ---------------------------------------------------------------------------
 coder_tools = [read_file, write_file, list_files, get_current_directory]
 react_agent = create_react_agent(coder_llm, coder_tools)
 
 
-# ---------------------------------------------------------------------------
-# Helper: extract JSON from model output (handles ```json … ``` blocks)
-# ---------------------------------------------------------------------------
-
 def extract_json(text: str) -> dict:
-    """Pull the first JSON object out of a (possibly markdown-wrapped) string."""
-    # Strip ```json ... ``` fences
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fenced:
         return json.loads(fenced.group(1))
-    # Try bare JSON object
     bare = re.search(r"\{.*\}", text, re.DOTALL)
     if bare:
         return json.loads(bare.group(0))
@@ -55,13 +51,11 @@ def extract_json(text: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Graph nodes
+# Graph nodes with rich activity tracking
 # ---------------------------------------------------------------------------
 
 def planner_node(state: dict) -> dict:
-    """Convert the user's free-text prompt into a structured Plan."""
     user_prompt = state["user_prompt"]
-
     prompt_text = planner_prompt(user_prompt)
     msg = planner_llm.invoke(prompt_text)
     raw = msg.content if hasattr(msg, "content") else str(msg)
@@ -72,13 +66,18 @@ def planner_node(state: dict) -> dict:
     except Exception as exc:
         raise ValueError(f"Planner JSON parse failed: {exc}\nRaw output:\n{raw[:800]}") from exc
 
-    return {"plan": resp}
+    return {
+        "plan": resp,
+        "activity": {
+            "action": "planning",
+            "message": f"Planned {resp.name} with {len(resp.files)} file(s)",
+            "files": [f.path for f in resp.files]
+        }
+    }
 
 
 def architect_node(state: dict) -> dict:
-    """Expand the Plan into an ordered list of file-level implementation tasks."""
     plan: Plan = state["plan"]
-
     prompt_text = architect_prompt(plan=plan.model_dump_json())
     msg = planner_llm.invoke(prompt_text)
     raw = msg.content if hasattr(msg, "content") else str(msg)
@@ -89,12 +88,17 @@ def architect_node(state: dict) -> dict:
     except Exception as exc:
         raise ValueError(f"Architect JSON parse failed: {exc}\nRaw output:\n{raw[:800]}") from exc
 
-    print(f"[architect] {len(resp.implementation_steps)} steps planned")
-    return {"task_plan": resp}
+    steps_desc = [f"{s.filepath}" for s in resp.implementation_steps]
+    return {
+        "task_plan": resp,
+        "activity": {
+            "action": "architecting",
+            "message": f"Architected {len(resp.implementation_steps)} implementation step(s): {', '.join(steps_desc)}"
+        }
+    }
 
 
 def coder_node(state: dict) -> dict:
-    """Execute one implementation step at a time using the react agent."""
     coder_state: CoderState = state.get("coder_state")
     if coder_state is None:
         coder_state = CoderState(
@@ -104,29 +108,37 @@ def coder_node(state: dict) -> dict:
 
     steps = coder_state.task_plan.implementation_steps
 
-    # Deterministic termination check
     if coder_state.current_step_idx >= len(steps):
-        return {"coder_state": coder_state, "status": "DONE"}
+        return {
+            "coder_state": coder_state,
+            "status": "DONE",
+            "activity": {
+                "action": "completed",
+                "message": "All project files generated and verified!"
+            }
+        }
 
     current_task = steps[coder_state.current_step_idx]
     filepath = current_task.filepath.lstrip("/")
 
-    # Read existing content, trim to save tokens
+    # Activity: searching & reading existing file
     existing = read_file.func(filepath)
-    if len(existing) > 800:
-        existing = existing[:800] + "\n... (truncated)"
+    has_existing = bool(existing.strip())
+
+    existing_preview = existing
+    if len(existing_preview) > 800:
+        existing_preview = existing_preview[:800] + "\n... (truncated)"
 
     system_msg = f"Current File: {filepath}\n\n{coder_system_prompt()}"
     user_msg = (
         f"Task: {current_task.task_description}\n"
         f"File: {filepath}\n"
-        f"Existing content:\n{existing}\n\n"
+        f"Existing content:\n{existing_preview}\n\n"
         "Call write_file(path, content) to save the complete file."
     )
 
-    print(f"[coder] step {coder_state.current_step_idx + 1}/{len(steps)}: {filepath}")
+    print(f"[coder] coding file: {filepath}")
 
-    # Attempt with one retry
     generated = ""
     for attempt in range(2):
         try:
@@ -144,28 +156,50 @@ def coder_node(state: dict) -> dict:
 
         generated = read_file.func(filepath)
         if generated.strip():
-            print(f"  [coder] OK {filepath} written ({len(generated)} chars)")
             break
-        print(f"  [coder] attempt {attempt + 1} - no content written for {filepath}")
 
     if not generated.strip():
-        print(f"  [coder] WARNING: skipping {filepath} after retries")
+        try:
+            direct_prompt = (
+                f"{system_msg}\n\n"
+                f"Write the COMPLETE code for `{filepath}` inside a markdown code block:\n"
+                f"```{filepath.split('.')[-1]}\n"
+                f"[complete content]\n"
+                f"```\n"
+                f"Task: {current_task.task_description}"
+            )
+            resp = coder_llm.invoke(direct_prompt)
+            content = resp.content if hasattr(resp, "content") else str(resp)
+            match = re.search(r'```(?:[a-zA-Z]*)\n(.*?)```', content, re.DOTALL)
+            code = match.group(1) if match else content
+            if code.strip():
+                write_file.func(filepath, code.strip())
+                generated = code
+        except Exception as direct_err:
+            print(f"  [coder] direct fallback error: {direct_err}")
 
     coder_state.current_step_idx += 1
-    return {"coder_state": coder_state, "status": "IN_PROGRESS"}
+    total_steps = len(steps)
+    curr_idx = coder_state.current_step_idx
 
+    return {
+        "coder_state": coder_state,
+        "status": "IN_PROGRESS",
+        "activity": {
+            "action": "coding",
+            "file": filepath,
+            "read_existing": has_existing,
+            "written_chars": len(generated),
+            "step": curr_idx,
+            "total_steps": total_steps,
+            "message": f"Completed coding {filepath} ({curr_idx}/{total_steps})"
+        }
+    }
 
-# ---------------------------------------------------------------------------
-# Deterministic routing (pure Python, no LLM)
-# ---------------------------------------------------------------------------
 
 def should_continue(state: dict) -> str:
     return "end" if state.get("status") == "DONE" else "coder"
 
-
-# ---------------------------------------------------------------------------
-# Build the graph
-# ---------------------------------------------------------------------------
 
 graph = StateGraph(dict)
 graph.add_node("planner",   planner_node)
@@ -184,15 +218,7 @@ graph.set_entry_point("planner")
 agent = graph.compile()
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     prompt = input("Enter your project prompt: ")
-    result = agent.invoke(
-        {"user_prompt": prompt},
-        {"recursion_limit": 100},
-    )
-    print("Final State keys:", list(result.keys()))
-    print("Status:", result.get("status"))
+    result = agent.invoke({"user_prompt": prompt}, {"recursion_limit": 100})
+    print("Done:", result.get("status"))

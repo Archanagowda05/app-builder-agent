@@ -13,6 +13,7 @@ export function useAgentSocket() {
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
   const [currentProject, setCurrentProject] = useState(null);
+  const [currentActivity, setCurrentActivity] = useState(null);
 
   const socketRef = useRef(null);
   const lastPromptRef = useRef("");
@@ -24,6 +25,7 @@ export function useAgentSocket() {
     setPlan(null);
     setTaskPlan(null);
     setCoderState(null);
+    setCurrentActivity(null);
     setLogs([]);
     setError(null);
   }, []);
@@ -62,6 +64,29 @@ export function useAgentSocket() {
           return;
         }
 
+        if (msg.type === "activity") {
+          setCurrentActivity(msg);
+          let icon = "⚡";
+          if (msg.action === "planning") icon = "📐";
+          else if (msg.action === "architecting") icon = "🏗️";
+          else if (msg.action === "searching") icon = "🔍";
+          else if (msg.action === "reading") icon = "📖";
+          else if (msg.action === "coding") icon = "✍️";
+          else if (msg.action === "completed_file") icon = "✅";
+
+          setLogs((prev) => [
+            ...prev,
+            {
+              type: `activity-${msg.action}`,
+              node: msg.action,
+              text: `${icon} ${msg.message}`,
+              file: msg.file,
+              phase: msg.phase,
+            },
+          ]);
+          return;
+        }
+
         if (msg.type === "error") {
           const friendly = {
             code: msg.code ?? "unknown",
@@ -70,6 +95,7 @@ export function useAgentSocket() {
           };
           setError(friendly);
           setStatus("error");
+          setCurrentActivity(null);
           setLogs((prev) => [...prev, { type: "error", text: friendly.message }]);
           return;
         }
@@ -77,8 +103,9 @@ export function useAgentSocket() {
         if (msg.type === "done") {
           setStatus("done");
           setActiveNode(null);
+          setCurrentActivity({ action: "done", message: "Build complete! All files generated." });
           if (msg.project_id) setCurrentProject(msg.project_id);
-          setLogs((prev) => [...prev, { type: "system", text: "Run complete! Project ready." }]);
+          setLogs((prev) => [...prev, { type: "system", text: "🎉 Run complete! Project ready." }]);
           return;
         }
 
@@ -89,30 +116,10 @@ export function useAgentSocket() {
 
           if (node === "planner" && data.plan) {
             setPlan(data.plan);
-            setLogs((prev) => [
-              ...prev,
-              { type: "step", node, text: `Created plan: ${data.plan.name}` },
-            ]);
           } else if (node === "architect" && data.task_plan) {
             setTaskPlan(data.task_plan);
-            setLogs((prev) => [
-              ...prev,
-              {
-                type: "step",
-                node,
-                text: `Broke plan into ${data.task_plan.implementation_steps.length} task(s)`,
-              },
-            ]);
           } else if (node === "coder" && data.coder_state) {
             setCoderState(data.coder_state);
-            const cs = data.coder_state;
-            const steps = cs.task_plan.implementation_steps;
-            const idx = cs.current_step_idx;
-            const label =
-              data.status === "DONE"
-                ? "All files generated"
-                : `Wrote ${steps[idx - 1]?.filepath ?? "file"} (${idx}/${steps.length})`;
-            setLogs((prev) => [...prev, { type: "step", node, text: label }]);
           }
         }
       };
@@ -149,6 +156,7 @@ export function useAgentSocket() {
     logs,
     error,
     currentProject,
+    currentActivity,
     run,
     retry,
   };

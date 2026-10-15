@@ -35,6 +35,7 @@ export default function App() {
     logs,
     error,
     currentProject,
+    currentActivity,
     run,
     retry,
   } = useAgentSocket();
@@ -174,6 +175,7 @@ export default function App() {
               activeNode={activeNode}
               completedNodes={completedNodes}
               status={status}
+              currentActivity={currentActivity}
             />
             <LogStream logs={logs} />
             <ErrorBanner error={error} onRetry={retry} />

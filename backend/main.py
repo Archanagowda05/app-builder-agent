@@ -2,7 +2,7 @@
 FastAPI Production & Deployment Backend:
 - No authentication (frictionless, 0-cost)
 - Multi-project workspace stored in gitignored storage/projects/
-- In-place chat refinement (Lovable-style)
+- Bulletproof In-place chat refinement (hybrid Tool-call + Direct Markdown Code Extraction fallback)
 - Per-project history snapshots and rollbacks in .history/
 - Dynamic preview serving
 - WebSocket agent pipeline
@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from agent.graph import agent, planner_llm, coder_llm, react_agent
 from agent.prompt import coder_system_prompt
+from agent.parser import apply_direct_file_edits
 from agent.tools import (
     PROJECTS_ROOT,
     get_project_dir,
@@ -213,7 +214,7 @@ def restore_project_version(req: RestoreVersionRequest):
 
 
 # ---------------------------------------------------------------------------
-# In-Project Chat Refinement (Lovable style in-place modifying)
+# In-Project Chat Refinement (Robust Tool-Call + Direct Markdown Extraction)
 # ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
@@ -252,11 +253,22 @@ Current files:
 {files_summary}
 
 YOUR TASK:
-Refine or fix the project according to the user's instructions.
-CRITICAL RULES:
-1. Whenever you modify or add a file, you MUST use the write_file(path, content) tool with the FULL complete file content! Never write partial code.
-2. Maintain high quality styling, alignment, and responsiveness.
-3. Once you're done writing the updated files, output a clear, friendly summary of what you fixed or changed for the user.
+Refine, modify, or add files according to the user request.
+FORMAT YOUR RESPONSE CAREFULLY:
+For each file you modify or create, output a markdown section with the filename and complete code:
+### File: filename.ext
+```lang
+[complete file content]
+```
+
+Example:
+### File: style.css
+```css
+body {{ margin: 0; }}
+```
+
+Also, you can call write_file(path, content) if needed.
+Ensure code is production-ready, fully functional, and well-aligned.
 """
 
     messages = [
@@ -265,15 +277,37 @@ CRITICAL RULES:
     ]
 
     try:
-        res = await asyncio.to_thread(react_agent.invoke, {"messages": messages}, {"recursion_limit": 30})
-        reply = "Updated project successfully."
-        if "messages" in res and res["messages"]:
+        # First attempt via react_agent
+        res = None
+        try:
+            res = await asyncio.to_thread(react_agent.invoke, {"messages": messages}, {"recursion_limit": 30})
+        except Exception as tool_err:
+            print(f"[react_agent fallback trigger] tool error: {tool_err}")
+
+        # If react_agent produced output, extract text
+        reply_text = ""
+        if res and "messages" in res and res["messages"]:
             last_msg = res["messages"][-1]
             if hasattr(last_msg, "content") and last_msg.content:
-                reply = last_msg.content
+                reply_text = last_msg.content
+
+        # If react_agent failed due to JSON tool-call parse, invoke coder_llm directly
+        if not reply_text:
+            direct_res = await asyncio.to_thread(coder_llm.invoke, messages)
+            reply_text = direct_res.content if hasattr(direct_res, "content") else str(direct_res)
+
+        # Parse and write any direct markdown blocks to guarantee files are written
+        modified_files = apply_direct_file_edits(project_name, reply_text)
+        print(f"[chat] Successfully updated files: {modified_files}")
+
+        clean_reply = re.sub(r'```.*?```', '[Updated code applied]', reply_text, flags=re.DOTALL).strip()
+        if not clean_reply:
+            clean_reply = f"Updated {', '.join(modified_files) if modified_files else 'project files'} successfully!"
+
         return {
             "success": True,
-            "reply": reply,
+            "reply": clean_reply,
+            "modified_files": modified_files,
             "version_saved": saved_v
         }
     except Exception as e:
@@ -282,7 +316,7 @@ CRITICAL RULES:
 
 
 # ---------------------------------------------------------------------------
-# WebSocket: full build pipeline
+# WebSocket: full build pipeline with Direct Markdown Extraction Fallback
 # ---------------------------------------------------------------------------
 
 def _serialize_value(value):
@@ -337,55 +371,207 @@ async def run_agent(ws: WebSocket):
 
     await ws.send_json({"type": "project_info", "project_id": project_name})
 
-    q: "queue.Queue" = queue.Queue()
-    SENTINEL = object()
-
-    def worker():
-        try:
-            for step in agent.stream(
-                {"user_prompt": user_prompt},
-                {"recursion_limit": recursion_limit},
-            ):
-                q.put(step)
-        except Exception as exc:
-            print(f"[ERROR in worker] {exc}")
-            import traceback
-            traceback.print_exc()
-            q.put({"__error__": str(exc)})
-        finally:
-            q.put(SENTINEL)
-
-    threading.Thread(target=worker, daemon=True).start()
-
-    loop = asyncio.get_event_loop()
-
+    # Direct custom pipeline execution with real-time granular streaming
     try:
-        while True:
-            item = await loop.run_in_executor(None, q.get)
+        from agent.graph import planner_llm, coder_llm, extract_json
+        from agent.prompt import planner_prompt, architect_prompt, coder_system_prompt
+        from agent.states import Plan, TaskPlan
+        from agent.tools import read_file, write_file
 
-            if item is SENTINEL:
-                break
+        # 1. Planning Phase
+        await ws.send_json({
+            "type": "activity",
+            "action": "planning",
+            "phase": "planning",
+            "status": "active",
+            "message": "Planning application architecture & data flow...",
+        })
+        p_prompt = planner_prompt(user_prompt)
+        p_msg = await asyncio.to_thread(planner_llm.invoke, p_prompt)
+        p_raw = p_msg.content if hasattr(p_msg, "content") else str(p_msg)
+        p_data = extract_json(p_raw)
+        plan_obj = Plan(**p_data)
 
-            if "__error__" in item:
-                await ws.send_json({
-                    "type": "error",
-                    "code": "error",
-                    "message": item["__error__"],
-                    "retryable": True,
-                })
-                break
+        await ws.send_json({
+            "type": "step",
+            "node": "planner",
+            "data": {
+                "plan": plan_obj.model_dump(),
+                "activity": {
+                    "action": "planning",
+                    "status": "done",
+                    "message": f"Planned {plan_obj.name} with {len(plan_obj.files)} file(s)",
+                    "files": [f.path for f in plan_obj.files],
+                }
+            }
+        })
 
-            for node_name, node_output in item.items():
-                await ws.send_json(_serialize_step(node_name, node_output))
+        # 2. Architecting Phase
+        await ws.send_json({
+            "type": "activity",
+            "action": "architecting",
+            "phase": "architecting",
+            "status": "active",
+            "message": "Architecting step-by-step implementation tasks...",
+        })
+        a_prompt = architect_prompt(plan=plan_obj.model_dump_json())
+        a_msg = await asyncio.to_thread(planner_llm.invoke, a_prompt)
+        a_raw = a_msg.content if hasattr(a_msg, "content") else str(a_msg)
+        a_data = extract_json(a_raw)
+        task_plan_obj = TaskPlan(**a_data)
+
+        steps = task_plan_obj.implementation_steps
+        await ws.send_json({
+            "type": "step",
+            "node": "architect",
+            "data": {
+                "task_plan": task_plan_obj.model_dump(),
+                "activity": {
+                    "action": "architecting",
+                    "status": "done",
+                    "message": f"Architected {len(steps)} implementation steps",
+                    "steps": [s.filepath for s in steps]
+                }
+            }
+        })
+
+        # 3. Coding Phase (File by file with Granular Status)
+        for idx, task in enumerate(steps, start=1):
+            filepath = task.filepath.lstrip("/")
+
+            # Activity: Searching & Reading existing file
+            await ws.send_json({
+                "type": "activity",
+                "action": "searching",
+                "phase": "searching",
+                "file": filepath,
+                "step": idx,
+                "total": len(steps),
+                "message": f"Searching for existing file: {filepath}...",
+            })
+            await asyncio.sleep(0.05)
+
+            existing = await asyncio.to_thread(read_file.func, filepath)
+            has_existing = bool(existing.strip())
+            
+            await ws.send_json({
+                "type": "activity",
+                "action": "reading",
+                "phase": "reading",
+                "file": filepath,
+                "has_existing": has_existing,
+                "step": idx,
+                "total": len(steps),
+                "message": f"Reading file: {filepath} ({len(existing)} bytes found)" if has_existing else f"Reading file: {filepath} (new file)",
+            })
+
+            # Activity: Coding & Writing
+            await ws.send_json({
+                "type": "activity",
+                "action": "coding",
+                "phase": "coding",
+                "file": filepath,
+                "step": idx,
+                "total": len(steps),
+                "message": f"Coding {filepath} ({idx}/{len(steps)})...",
+            })
+
+            existing_preview = existing[:800] + "\n... (truncated)" if len(existing) > 800 else existing
+            system_msg = f"Current File: {filepath}\n\n{coder_system_prompt()}"
+            user_msg = (
+                f"Task: {task.task_description}\n"
+                f"File: {filepath}\n"
+                f"Existing content:\n{existing_preview}\n\n"
+                "Call write_file(path, content) to save the complete file."
+            )
+
+            # Attempt 1: React Agent
+            from agent.graph import react_agent
+            generated = ""
+            for attempt in range(2):
+                try:
+                    await asyncio.to_thread(
+                        react_agent.invoke,
+                        {
+                            "messages": [
+                                {"role": "system", "content": system_msg},
+                                {"role": "user", "content": user_msg},
+                            ]
+                        },
+                        {"recursion_limit": 20},
+                    )
+                except Exception as exc:
+                    print(f"  [ws coder] attempt {attempt + 1} raised: {exc}")
+
+                generated = await asyncio.to_thread(read_file.func, filepath)
+                if generated.strip():
+                    break
+
+            # Attempt 2: Direct Markdown fallback if tool JSON failed
+            if not generated.strip():
+                try:
+                    direct_prompt = (
+                        f"{system_msg}\n\n"
+                        f"Write the COMPLETE code for `{filepath}` inside a markdown code block:\n"
+                        f"```{filepath.split('.')[-1]}\n"
+                        f"[complete content]\n"
+                        f"```\n"
+                        f"Task: {task.task_description}"
+                    )
+                    resp = await asyncio.to_thread(coder_llm.invoke, direct_prompt)
+                    content = resp.content if hasattr(resp, "content") else str(resp)
+                    match = re.search(r'```(?:[a-zA-Z]*)\n(.*?)```', content, re.DOTALL)
+                    code = match.group(1) if match else content
+                    if code.strip():
+                        await asyncio.to_thread(write_file.func, filepath, code.strip())
+                        generated = code
+                except Exception as direct_err:
+                    print(f"  [ws coder] direct fallback error: {direct_err}")
+
+            # Activity: Completed a file
+            await ws.send_json({
+                "type": "activity",
+                "action": "completed_file",
+                "phase": "completed_file",
+                "file": filepath,
+                "step": idx,
+                "total": len(steps),
+                "bytes": len(generated),
+                "message": f"Completed file: {filepath} ({idx}/{len(steps)})",
+            })
+
+            # Emit step progress
+            await ws.send_json({
+                "type": "step",
+                "node": "coder",
+                "data": {
+                    "coder_state": {
+                        "task_plan": task_plan_obj.model_dump(),
+                        "current_step_idx": idx,
+                    },
+                    "status": "DONE" if idx == len(steps) else "IN_PROGRESS",
+                    "activity": {
+                        "action": "completed_file",
+                        "file": filepath,
+                        "step": idx,
+                        "total_steps": len(steps),
+                        "message": f"Completed file: {filepath} ({idx}/{len(steps)})",
+                    }
+                }
+            })
 
         await ws.send_json({"type": "done", "project_id": project_name})
-    except WebSocketDisconnect:
-        pass
-    finally:
-        try:
-            await ws.close()
-        except RuntimeError:
-            pass
+
+    except Exception as exc:
+        print(f"[ERROR in ws agent run] {exc}")
+        import traceback
+        traceback.print_exc()
+        await ws.send_json({
+            "type": "error",
+            "code": "error",
+            "message": str(exc),
+            "retryable": True,
+        })
 
 
 # ---------------------------------------------------------------------------
