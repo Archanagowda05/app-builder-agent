@@ -1,91 +1,169 @@
+<div align="center">
+
 # ⚡ App Builder Agent
+### *Interactive AI Web App Generator & In-Place Code Refiner*
 
-> An interactive AI-powered web app generator & editor inspired by Lovable. Build complete web apps from natural language, preview them in real time, and iteratively edit code in-place through a persistent chat interface.
+<p align="center">
+  <a href="https://app-builder-agent-zd50.onrender.com/">
+    <img src="https://img.shields.io/badge/🌐_Live_Demo-Render-6366f1?style=for-the-badge&logo=render&logoColor=white" alt="Live Demo" />
+  </a>
+  <img src="https://img.shields.io/badge/Python-3.10+-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/React-18.3+-61dafb?style=for-the-badge&logo=react&logoColor=black" alt="React" />
+  <img src="https://img.shields.io/badge/Vite-5.4+-646cff?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
+  <img src="https://img.shields.io/badge/Docker-Enabled-2496ed?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
+</p>
 
-🌐 **Live Demo:** [https://app-builder-agent-zd50.onrender.com/](https://app-builder-agent-zd50.onrender.com/)
+<p align="center">
+  <b>Build entire web applications from plain English, preview them side-by-side in real-time, and iteratively refine code in-place through a persistent chat interface — just like Lovable.</b>
+</p>
 
----
-
-## 🌟 Key Features
-
-- **💬 Lovable-Style In-Place Chat Editing**:
-  - Tweak styling, add features, fix bugs, or adjust layouts without regenerating the entire app.
-  - Automatically modifies existing files in-place while keeping project history intact.
-  - Remembers conversation history per project with instant clear/reset options.
-- **⚡ 3-Tier Multi-Agent Pipeline**:
-  - 📐 **Planner**: Translates user requirements into a comprehensive architectural plan (`openai/gpt-oss-20b`).
-  - 🏗️ **Architect**: Decomposes the plan into ordered, file-level implementation tasks.
-  - ✍️ **Coder**: Implements production-ready code file by file with automated validation (`openai/gpt-oss-120b`).
-- **🔍 Granular Live Activity Streaming**:
-  - Real-time visual progress through every sub-phase:
-    - 📐 `planning`: Application architecture & feature definition
-    - 🏗️ `architecting`: Task decomposition & dependency ordering
-    - 🔍 `searching`: Locating project files in the workspace
-    - 📖 `reading`: Inspecting existing code or detecting new files
-    - ✍️ `coding`: Generating file contents with live progress count `(x / y)`
-    - ✅ `completed_file`: Verification and disk persistence
-- **🕒 Automatic Version Snapshots & Rollbacks**:
-  - Every initial build and subsequent chat modification automatically saves a point-in-time snapshot.
-  - One-click rollback to any prior version from the **History** tab.
-- **👁️ Live Interactive Preview**:
-  - Embedded, isolated live iframe preview with instant cache-busting refresh.
-- **📁 Isolated Git-Clean Workspace**:
-  - All user projects and history versions are stored in `storage/projects/<project_name>`, strictly isolated and gitignored.
-- **🛡️ Robust Fallback Engine**:
-  - Dual-mode execution automatically switches to markdown code extraction whenever Groq encounters tool-call JSON parsing limits.
+```
+  📐 Planning  ───►  🏗️ Architecting  ───►  🔍 Searching  ───►  📖 Reading  ───►  ✍️ Coding  ───►  ✅ Completed
+```
 
 ---
 
-## 🏗️ Architecture
+<p align="center">
+  <a href="#-key-features">Key Features</a> •
+  <a href="#-generation-lifecycle">Pipeline</a> •
+  <a href="#-tech-stack">Tech Stack</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-docker-deployment">Docker</a> •
+  <a href="#-architecture">Architecture</a>
+</p>
+
+---
+
+</div>
+
+<br/>
+
+## ✨ Key Features
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>💬 In-Place Chat Editing</h3>
+      <p>Modify existing project files directly without wiping and rebuilding from scratch. Tweak styles, fix bugs, add buttons, and enhance logic seamlessly with persistent history.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>👁️ Side-by-Side Live Preview</h3>
+      <p>Interactive sandboxed iframe with automatic cache busting. Inspect changes the moment the agent finishes writing code.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>⚡ Multi-Agent Pipeline</h3>
+      <p>Powered by LangGraph with specialized models: <b>Planner</b> (structure & design), <b>Architect</b> (dependency ordering), and <b>Coder</b> (production code generation).</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>🕒 Automatic Version Rollbacks</h3>
+      <p>Every initial generation and chat modification creates a snapshot. Roll back to any previous state with a single click.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🛡️ Direct Markdown Fallback</h3>
+      <p>Guaranteed resilient code extraction. If a model encounters JSON tool-call escaping limits, the engine automatically extracts code fences.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>📁 Git-Clean Isolated Storage</h3>
+      <p>Zero repository clutter. All user generated code and version backups live in isolated, gitignored project directories.</p>
+    </td>
+  </tr>
+</table>
+
+<br/>
+
+## 🔄 Generation Lifecycle
+
+The agent streams fine-grained live updates over WebSockets so you can follow every step of creation:
+
+```mermaid
+flowchart LR
+    A["📐 Planning<br/><b>Architecture & Files</b>"] --> B["🏗️ Architecting<br/><b>Task Breakdown</b>"]
+    B --> C["🔍 Searching<br/><b>Locate Existing Files</b>"]
+    C --> D["📖 Reading<br/><b>Inspect Context</b>"]
+    D --> E["✍️ Coding<br/><b>Write File (x / y)</b>"]
+    E --> F["✅ Completed<br/><b>Verify & Save</b>"]
+
+    style A fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#fff
+    style B fill:#1e293b,stroke:#60a5fa,stroke-width:2px,color:#fff
+    style C fill:#27272a,stroke:#fde047,stroke-width:2px,color:#fff
+    style D fill:#134e4a,stroke:#2dd4bf,stroke-width:2px,color:#fff
+    style E fill:#312e81,stroke:#a5b4fc,stroke-width:2px,color:#fff
+    style F fill:#064e3b,stroke:#4ade80,stroke-width:2px,color:#fff
+```
+
+| Phase | Icon | Role | Description |
+| :--- | :---: | :--- | :--- |
+| **Planning** | 📐 | `Planner` | Translates user prompt into data models, features, and file manifest |
+| **Architecting** | 🏗️ | `Architect` | Sequences tasks in dependency order (HTML → CSS → JS) |
+| **Searching** | 🔍 | `Scanner` | Checks active project workspace for existing code |
+| **Reading** | 📖 | `Context` | Reads file content or flags file as new |
+| **Coding** | ✍️ | `Coder` | Writes complete, production-ready code with live progress indicators |
+| **Completed** | ✅ | `Verifier` | Validates file persistence and refreshes live preview |
+
+<br/>
+
+## 🛠️ Tech Stack
+
+<div align="center">
+
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend** | React 18 • Vite • CSS Glassmorphism • WebSockets |
+| **Backend** | FastAPI • Uvicorn • Python AsyncIO • Pydantic v2 |
+| **LLM Orchestration** | LangGraph • LangChain Core • Groq Cloud (`gpt-oss-120b`, `gpt-oss-20b`) |
+| **Deployment** | Docker • Render • Cloudflare |
+
+</div>
+
+<br/>
+
+## 📁 Architecture Overview
 
 ```
 app-builder-agent/
-├── agent/
-│   ├── graph.py        # LangGraph StateGraph pipeline (Planner → Architect → Coder)
-│   ├── prompt.py       # LLM prompts for Planning, Architecting, and Coding
-│   ├── states.py       # Pydantic schemas for Plan, TaskPlan, and CoderState
-│   ├── tools.py        # Project file I/O tools (read_file, write_file, safe paths)
-│   └── parser.py       # Markdown code block extractor fallback
-├── backend/
-│   └── main.py         # FastAPI app, WebSocket generation runner, Chat API, Static Preview
-├── frontend/
+├── 🤖 agent/
+│   ├── graph.py        # LangGraph StateGraph (Planner → Architect → Coder)
+│   ├── prompt.py       # Prompts for Planner, Architect, and Coder
+│   ├── states.py       # Pydantic state schemas (Plan, TaskPlan, CoderState)
+│   ├── tools.py        # Project file tools (read_file, write_file, safe paths)
+│   └── parser.py       # Fallback direct markdown code fence extractor
+├── 🚀 backend/
+│   └── main.py         # FastAPI WebSocket streamer, Chat API, Static preview
+├── 💻 frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── ChatEditor.jsx      # In-place chat refinement with history & badge pills
-│   │   │   ├── PipelineStatus.jsx  # Lovable-style visual step bar with live indicators
-│   │   │   ├── PreviewPane.jsx     # Live sandbox iframe with refresh button
-│   │   │   ├── ProjectSidebar.jsx  # Minimizable multi-project workspace drawer
-│   │   │   ├── HistoryView.jsx     # Version snapshots & rollbacks
-│   │   │   ├── FileExplorer.jsx    # Project source code file viewer
-│   │   │   ├── LogStream.jsx       # Color-coded live event logs
-│   │   │   └── PlanView.jsx        # Architectural specifications breakdown
-│   │   ├── hooks/
-│   │   │   └── useAgentSocket.js   # WebSocket client for real-time generation phases
-│   │   └── App.jsx                 # Main 3-panel workspace layout
-│   └── dist/                       # Production frontend build
-├── storage/projects/   # Isolated project workspaces & snapshots (gitignored)
-├── Dockerfile          # Single-container production build (Node + Python)
-└── render.yaml         # Render deployment configuration
+│   │   │   ├── ChatEditor.jsx      # In-place chat with localStorage history & badges
+│   │   │   ├── PipelineStatus.jsx  # Lovable icon step bar with live pulse indicator
+│   │   │   ├── PreviewPane.jsx     # Live sandbox iframe with cache-busting refresh
+│   │   │   ├── ProjectSidebar.jsx  # Collapsible project drawer
+│   │   │   ├── HistoryView.jsx     # Point-in-time version rollback viewer
+│   │   │   ├── FileExplorer.jsx    # Project source tree & code inspector
+│   │   │   ├── LogStream.jsx       # Color-coded live activity logs
+│   │   │   └── PlanView.jsx        # Architecture specification viewer
+│   │   └── App.jsx                 # Main 3-panel workspace interface
+│   └── dist/                       # Compiled production frontend assets
+├── 📦 storage/projects/ # User projects and snapshot versions (gitignored)
+├── 🐳 Dockerfile       # Multi-stage production container build
+└── ⚙️ render.yaml      # Render blueprint configuration
 ```
 
----
+<br/>
 
-## 🚀 Getting Started
+## 🚀 Quick Start
 
-### Prerequisites
-
-- **Python 3.10+**
-- **Node.js 18+** & npm
-- **Groq API Key** (set in `.env`)
-
-### 1. Environment Setup
-
-Clone the repository and create your `.env` file:
+### 1️⃣ Clone the Repository
 
 ```bash
 git clone https://github.com/your-username/app-builder-agent.git
 cd app-builder-agent
 ```
+
+### 2️⃣ Configure Environment
 
 Create a `.env` file in the root directory:
 
@@ -94,19 +172,23 @@ GROQ_API_KEY=your_groq_api_key_here
 PORT=8000
 ```
 
-### 2. Backend Setup
+### 3️⃣ Backend Setup
 
 ```bash
+# Create and activate virtual environment
 python -m venv venv
-# Windows:
+
+# Windows
 venv\Scripts\activate
-# macOS/Linux:
+
+# macOS / Linux
 source venv/bin/activate
 
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Frontend Setup & Build
+### 4️⃣ Frontend Build
 
 ```bash
 cd frontend
@@ -115,38 +197,36 @@ npm run build
 cd ..
 ```
 
-### 4. Run Locally
-
-Start the unified server with Uvicorn:
+### 5️⃣ Run the Application
 
 ```bash
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Open your browser at **`http://localhost:8000`**.
+Navigate to **`http://localhost:8000`** in your browser.
 
----
+<br/>
 
 ## 🐳 Docker Deployment
 
-The application includes a production multi-stage `Dockerfile` that builds the React frontend with Vite and serves everything via FastAPI from a single lightweight container:
+Run the complete multi-stage container locally or in production:
 
 ```bash
+# Build Docker image
 docker build -t app-builder-agent .
-docker run -p 8000:8000 -e GROQ_API_KEY="your_key" app-builder-agent
+
+# Run container
+docker run -p 8000:8000 -e GROQ_API_KEY="your_groq_api_key" app-builder-agent
 ```
 
----
+<br/>
 
-## 🛠️ Tech Stack
+## 🤝 Contributing
 
-- **Frontend**: React 18, Vite, Lucide/Unicode icons, CSS Glassmorphism
-- **Backend**: FastAPI, Uvicorn, WebSockets, Python `asyncio`
-- **Agent Orchestration**: LangGraph, LangChain, Groq API (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`)
-- **Deployment**: Docker, Render
+Contributions, issues, and feature requests are welcome! Feel free to open an issue or submit a pull request.
 
----
+<br/>
 
 ## 📄 License
 
-MIT License. Free to use and modify.
+This project is licensed under the **MIT License**.
