@@ -120,36 +120,48 @@ export default function App() {
               Active Project Workspace
             </div>
           </div>
-          <div style={{ display: "flex", gap: "4px", background: "var(--surface)", padding: "3px", borderRadius: "6px" }}>
+          <div style={{ display: "flex", gap: "4px", background: "var(--surface)", padding: "3px", borderRadius: "8px" }}>
             <button
               onClick={() => setLeftTab("chat")}
+              title="Chat & In-place edits"
               style={{
                 background: leftTab === "chat" ? "var(--accent)" : "transparent",
                 color: leftTab === "chat" ? "#fff" : "var(--text-secondary)",
                 border: "none",
-                borderRadius: "4px",
-                padding: "4px 10px",
+                borderRadius: "6px",
+                padding: "5px 12px",
                 fontSize: "12px",
                 fontWeight: "600",
                 cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                transition: "all 0.2s",
               }}
             >
-              💬 Modify
+              <span>💬</span>
+              <span>Chat</span>
             </button>
             <button
               onClick={() => setLeftTab("build")}
+              title="Full build from scratch"
               style={{
                 background: leftTab === "build" ? "var(--accent)" : "transparent",
                 color: leftTab === "build" ? "#fff" : "var(--text-secondary)",
                 border: "none",
-                borderRadius: "4px",
-                padding: "4px 10px",
+                borderRadius: "6px",
+                padding: "5px 12px",
                 fontSize: "12px",
                 fontWeight: "600",
                 cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                transition: "all 0.2s",
               }}
             >
-              ⚡ Full Rebuild
+              <span>⚡</span>
+              <span>Build</span>
             </button>
           </div>
         </div>
@@ -168,9 +180,6 @@ export default function App() {
         {/* Tab 2: Full Build / Scratch Generation Mode */}
         {leftTab === "build" && (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "16px", gap: "14px", overflowY: "auto" }}>
-            <div style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
-              Re-generate or plan the full application from a complete specification prompt:
-            </div>
             <PipelineStatus
               activeNode={activeNode}
               completedNodes={completedNodes}
@@ -205,26 +214,30 @@ export default function App() {
             <button
               className={`tab ${rightTab === "preview" ? "active" : ""}`}
               onClick={() => setRightTab("preview")}
+              title="Live interactive preview"
             >
               👁️ Preview
             </button>
             <button
               className={`tab ${rightTab === "files" ? "active" : ""}`}
               onClick={() => setRightTab("files")}
+              title="Source code files"
             >
-              📄 Code Files
+              📄 Files
             </button>
             <button
               className={`tab ${rightTab === "history" ? "active" : ""}`}
               onClick={() => setRightTab("history")}
+              title="Version history & snapshots"
             >
-              🕒 Version History
+              🕒 History
             </button>
             <button
               className={`tab ${rightTab === "plan" ? "active" : ""}`}
               onClick={() => setRightTab("plan")}
+              title="Architecture plan"
             >
-              📋 Architecture Plan
+              📋 Plan
             </button>
           </div>
 
