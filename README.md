@@ -73,62 +73,36 @@ Groky operates using **4 specialized agents** working in orchestration:
 ## 🏛️ System Architecture Design
 
 ```mermaid
-graph TD
-    subgraph Client["💻 User Interface (React 18 + Vite)"]
-        UI_Prompt["💬 Chat & Prompt Form"]
-        UI_Pipeline["⚡ Lovable-Style Step Bar"]
-        UI_Preview["👁️ Sandbox Live Preview (iframe)"]
-        UI_Files["📄 File Explorer & History"]
+graph LR
+    subgraph UI["💻 React Client"]
+        A["💬 Chat / Prompt"]
+        B["👁️ Live Preview"]
     end
 
-    subgraph Gateway["🚀 FastAPI Backend Server"]
-        WS["⚡ WebSocket Streamer (/ws/run)"]
-        API_Chat["💬 In-Place Chat API (/api/chat)"]
-        API_History["🕒 Snapshot & Restore API"]
-        API_Preview["👁️ Static Live Preview Router"]
+    subgraph Server["🚀 FastAPI Server"]
+        WS["⚡ WebSockets"]
+        REST["🔌 REST APIs"]
     end
 
-    subgraph AgentSwarm["🤖 Groky Agent Engine (LangGraph)"]
-        Agent_Plan["📐 1. Planner Agent<br/><i>(gpt-oss-20b)</i>"]
-        Agent_Arch["🏗️ 2. Architect Agent<br/><i>(gpt-oss-20b)</i>"]
-        
-        subgraph CoderLoop["✍️ 3. Coder Agent Execution Loop"]
-            Scan["🔍 File Scanner & Search"]
-            Read["📖 Context Reader"]
-            Code["✍️ Code Generator<br/><i>(gpt-oss-120b)</i>"]
-            Verify["✅ File Verifier"]
-        end
-        
-        Agent_Editor["💬 4. In-Place Editor Agent<br/><i>(gpt-oss-120b)</i>"]
+    subgraph Agents["🤖 Multi-Agent Swarm"]
+        Plan["📐 Planner<br/><i>gpt-20b</i>"]
+        Arch["🏗️ Architect<br/><i>gpt-20b</i>"]
+        Code["✍️ Coder<br/><i>gpt-120b</i>"]
+        Edit["💬 In-Place Editor<br/><i>gpt-120b</i>"]
     end
 
-    subgraph Storage["📦 Isolated Storage (Git-Clean)"]
-        Store_Files["📁 storage/projects/{app_id}"]
-        Store_History["🕒 .history/ snapshots"]
+    subgraph Storage["📦 Storage"]
+        Store["📁 storage/projects/<br/><i>Files & Snapshots</i>"]
     end
 
-    %% Flow Connections
-    UI_Prompt -->|User Prompt| WS
-    UI_Prompt -->|Refinement Message| API_Chat
-    
-    WS --> Agent_Plan
-    Agent_Plan -->|Plan JSON| Agent_Arch
-    Agent_Arch -->|Task Plan| Scan
-    Scan --> Read --> Code --> Verify
-    Verify -->|Next File| Scan
-    Verify -->|All Files Done| Store_Files
+    A -->|Prompt| WS --> Plan --> Arch --> Code --> Store
+    A -->|Edit| REST --> Edit --> Store
+    Store -->|Live Render| B
 
-    API_Chat --> Agent_Editor
-    Agent_Editor --> Store_Files
-    
-    Store_Files --> API_Preview --> UI_Preview
-    Store_History --> API_History --> UI_Files
-    CoderLoop -.->|Live Activity Progress| WS -.->|Real-time Events| UI_Pipeline
-
-    style Client fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#fff
-    style Gateway fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#fff
-    style AgentSwarm fill:#14532d,stroke:#4ade80,stroke-width:2px,color:#fff
-    style Storage fill:#312e81,stroke:#a855f7,stroke-width:2px,color:#fff
+    style UI fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#fff
+    style Server fill:#1e1b4b,stroke:#818cf8,stroke-width:1.5px,color:#fff
+    style Agents fill:#064e3b,stroke:#4ade80,stroke-width:1.5px,color:#fff
+    style Storage fill:#312e81,stroke:#a855f7,stroke-width:1.5px,color:#fff
 ```
 
 <br/>
